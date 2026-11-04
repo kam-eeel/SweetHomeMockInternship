@@ -2002,12 +2002,38 @@ public class PlanComponent extends JComponent implements PlanView, Scrollable, P
     }
     return strokeWidth;
   }
-  
+
   /**
-   * Prints this component plan at the scale given in the home print attributes or at a scale 
+   * Returns the count of pages required to print the plan of one level,
+   * or 0 if there's nothing to print.
+   */
+  private int getPrintPageCountPerLevel(Graphics g, PageFormat pageFormat) {
+    Rectangle2D printedItemBounds = getItemsBounds(g, getPaintedItems());
+    if (printedItemBounds == null) {
+      return 0;
+    } else if (this.home.getPrint() == null || this.home.getPrint().getPlanScale() == null) {
+      return 1;
+    } else {
+      double imageableWidth = pageFormat.getImageableWidth();
+      double imageableHeight = pageFormat.getImageableHeight();
+      float printScale = this.home.getPrint().getPlanScale().floatValue() * LengthUnit.centimeterToInch(72);
+      int pagesPerRow = (int)(printedItemBounds.getWidth() * printScale / imageableWidth);
+      if (printedItemBounds.getWidth() * printScale != imageableWidth) {
+        pagesPerRow++;
+      }
+      int pagesPerColumn = (int)(printedItemBounds.getHeight() * printScale / imageableHeight);
+      if (printedItemBounds.getHeight() * printScale != imageableHeight) {
+        pagesPerColumn++;
+      }
+      return pagesPerRow * pagesPerColumn;
+    }
+  }
+
+  /**
+   * Prints the plan of the selected level at the scale given in the home print attributes or at a scale
    * that makes it fill <code>pageFormat</code> imageable size if this attribute is <code>null</code>.
    */
-  public int print(Graphics g, PageFormat pageFormat, int pageIndex) {
+  private int printSelectedLevel(Graphics g, PageFormat pageFormat, int pageIndex) {
     List<Selectable> printedItems = getPaintedItems(); 
     Rectangle2D printedItemBounds = getItemsBounds(g, printedItems);
     if (printedItemBounds != null) {
@@ -2074,7 +2100,38 @@ public class PlanComponent extends JComponent implements PlanView, Scrollable, P
       return NO_SUCH_PAGE;
     }
   }
-  
+
+  /**
+   * Prints one page of this component plan for each viewable level of the home,
+   * in the order of home levels. If a plan scale is set, the plan of each level
+   * may span several pages. If the home doesn't contain any viewable level,
+   * prints the plan as it's displayed.
+   * The selected level of the home is temporarily changed to print each level
+   * and is always restored once the page is printed.
+   */
+  public int print(Graphics g, PageFormat pageFormat, int pageIndex) {
+    List<Level> viewableLevels = new ArrayList<Level>();
+    for (Level level : this.home.getLevels()) {
+      if (level.isViewable()) {
+        viewableLevels.add(level);
+      }
+    }
+    if (viewableLevels.isEmpty()) {
+      return printSelectedLevel(g, pageFormat, pageIndex);
+    }
+    int pageCountPerLevel = getPrintPageCountPerLevel(g, pageFormat);
+    if (pageIndex >= viewableLevels.size() * pageCountPerLevel) {
+      return NO_SUCH_PAGE;
+    }
+    Level originalLevel = this.home.getSelectedLevel();
+    try {
+      this.home.setSelectedLevel(viewableLevels.get(pageIndex / pageCountPerLevel));
+      return printSelectedLevel(g, pageFormat, pageIndex % pageCountPerLevel);
+    } finally {
+      this.home.setSelectedLevel(originalLevel);
+    }
+  }
+
   /**
    * Returns an image of the selected items displayed by this component 
    * (camera excepted) with no outline at scale 1/1 (1 pixel = 1cm).
